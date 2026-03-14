@@ -1,5 +1,6 @@
+from .metrics import MetricsCollector
 from .models import BandFrame
 from .ring_buffer import RingBuffer
 from .state import StateManager
 
-__all__ = ["BandFrame", "RingBuffer", "StateManager"]
+__all__ = ["BandFrame", "MetricsCollector", "RingBuffer", "StateManager"]
