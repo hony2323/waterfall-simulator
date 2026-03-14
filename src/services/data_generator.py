@@ -36,13 +36,14 @@ class DataGeneratorService(IDataService):
 
     async def _run(self) -> None:
         interval = self._settings.generation_interval_ms / 1000.0
-        size = self._settings.array_size
 
         while True:
             # All bands share the same timestamp per generation cycle
             ts = datetime.now(timezone.utc)
 
             for band in self._settings.bands:
+                step = band.step if band.step is not None else self._settings.step
+                size = max(1, round((band.end - band.start) / step))
                 t0 = time.perf_counter()
                 data = np.random.uniform(0.0, 100.0, size).astype(np.float32)
                 frame = BandFrame(

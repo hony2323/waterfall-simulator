@@ -8,11 +8,12 @@ class BandConfig(BaseModel):
     id: str
     start: float        # Hz or logical band start
     end: float          # Hz or logical band end
+    step: float | None = None        # Hz per sample; overrides global if set
     ring_buffer_size: int | None = None  # overrides global if set
 
 
 class Settings(BaseSettings):
-    array_size: int = 65536          # number of samples per frame (64k default)
+    step: float = 1.0                # Hz per sample (array size = (end - start) / step)
     ring_buffer_size: int = 100      # frames kept per band
     generation_interval_ms: int = 500
     ws_send_interval_ms: int = 100

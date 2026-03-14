@@ -19,11 +19,17 @@ def _build_binary_message(frames: list[BandFrame], precision: str) -> bytes:
       [uint32 header_len][JSON header bytes][band data bytes ...]
 
     Header is a JSON array, one entry per band:
-      { band_id, band_start, band_end, timestamp, length, precision }
+      { band_id, band_start, band_end, timestamp, sent_at, length, precision }
+
+    `sent_at` is the Unix epoch in milliseconds recorded just before the message
+    is serialised; the client subtracts it from its receive time to measure
+    end-to-end delivery latency.
 
     Data section is all bands' raw bytes concatenated in the same order.
     Client reconstructs each band by slicing `length` samples of the known dtype.
     """
+    sent_at_ms = datetime.now(timezone.utc).timestamp() * 1000
+
     header_entries = []
     data_parts = []
 
@@ -34,6 +40,7 @@ def _build_binary_message(frames: list[BandFrame], precision: str) -> bytes:
             "band_start": frame.band_start,
             "band_end": frame.band_end,
             "timestamp": frame.timestamp.isoformat(),
+            "sent_at": sent_at_ms,
             "length": len(frame.data),
             "precision": precision,
         })
