@@ -45,7 +45,14 @@ class DataGeneratorService(IDataService):
                 step = band.step if band.step is not None else self._settings.step
                 size = max(1, round((band.end - band.start) / step))
                 t0 = time.perf_counter()
-                data = np.random.uniform(0.0, 100.0, size).astype(np.float32)
+                # Gradient (0→100 left-to-right) with slow per-frame brightness shift
+                # so rows differ over time — easy to verify freq + level in tooltip.
+                # Swap back to np.random.uniform for realistic noise.
+                phase = np.sin(time.time() * 0.8) * 15.0
+                data = np.clip(
+                    np.linspace(0.0, 100.0, size, dtype=np.float32) + phase,
+                    0.0, 100.0,
+                )
                 frame = BandFrame(
                     band_id=band.id,
                     band_start=band.start,
