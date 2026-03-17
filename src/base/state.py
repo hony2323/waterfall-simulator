@@ -24,3 +24,7 @@ class StateManager(IStateManager):
     def get_band_history(self, band_id: str) -> list[BandFrame]:
         buf = self._buffers.get(band_id)
         return buf.all() if buf else []
+
+    def band_depth(self, band_id: str) -> int:
+        buf = self._buffers.get(band_id)
+        return len(buf) if buf else 0
