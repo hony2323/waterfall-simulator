@@ -69,6 +69,6 @@ class DataGeneratorService(IDataService):
                 self._state.push(band.id, frame)
                 duration_ms = (time.perf_counter() - t0) * 1000
                 depth = len(self._state.get_band_history(band.id))
-                self._metrics.record_frame_generated(band.id, duration_ms, depth)
+                self._metrics.record_frame_generated(band.id, duration_ms, duration_ms, depth)
 
             await asyncio.sleep(interval)

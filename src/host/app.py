@@ -80,33 +80,41 @@ def create_app() -> FastAPI:
     def get_metrics():
         return metrics.snapshot()
 
+    async def _send_snapshot(websocket: WebSocket) -> None:
+        snapshot = state.latest()
+        frames = [f for f in snapshot.values() if f is not None]
+
+        t_build = time.perf_counter()
+        message = _build_binary_message(frames, settings.precision)
+        build_ms = (time.perf_counter() - t_build) * 1000
+
+        t_send = time.perf_counter()
+        await websocket.send_bytes(message)
+        send_ms = (time.perf_counter() - t_send) * 1000
+
+        now = datetime.now(timezone.utc)
+        frame_age_ms = (
+            max((now - f.timestamp).total_seconds() * 1000 for f in frames)
+            if frames else 0.0
+        )
+        metrics.record_ws_send(len(message), frame_age_ms, build_ms, send_ms)
+
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket):
         await websocket.accept()
         metrics.record_ws_connected()
-        interval = settings.ws_send_interval_ms / 1000.0
 
         try:
-            while True:
-                snapshot = state.latest()
-                frames = [f for f in snapshot.values() if f is not None]
-
-                t_build = time.perf_counter()
-                message = _build_binary_message(frames, settings.precision)
-                build_ms = (time.perf_counter() - t_build) * 1000
-
-                t_send = time.perf_counter()
-                await websocket.send_bytes(message)
-                send_ms = (time.perf_counter() - t_send) * 1000
-
-                now = datetime.now(timezone.utc)
-                frame_age_ms = (
-                    max((now - f.timestamp).total_seconds() * 1000 for f in frames)
-                    if frames else 0.0
-                )
-                metrics.record_ws_send(len(message), frame_age_ms, build_ms, send_ms)
-
-                await asyncio.sleep(interval)
+            if settings.ws_mode == "push":
+                while True:
+                    async with state.data_available:
+                        await state.data_available.wait()
+                    await _send_snapshot(websocket)
+            else:
+                interval = settings.ws_send_interval_ms / 1000.0
+                while True:
+                    await _send_snapshot(websocket)
+                    await asyncio.sleep(interval)
         except WebSocketDisconnect:
             metrics.record_ws_disconnected()
 
