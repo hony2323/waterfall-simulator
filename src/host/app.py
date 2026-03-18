@@ -14,6 +14,7 @@ from ..config.settings import Settings
 from ..core.interfaces import IDataService
 from ..services.data_generator import DataGeneratorService
 from ..services.microphone_service import MicrophoneService
+from ..services.realistic_generator import RealisticGeneratorService
 
 
 def _build_binary_message(frames: list[BandFrame], precision: str) -> bytes:
@@ -61,8 +62,10 @@ def create_app() -> FastAPI:
     service: IDataService
     if settings.data_source == "microphone":
         service = MicrophoneService(state, settings, metrics)
-    else:
+    elif settings.data_source == "generator_simple":
         service = DataGeneratorService(state, settings, metrics)
+    else:
+        service = RealisticGeneratorService(state, settings, metrics)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
