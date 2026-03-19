@@ -12,11 +12,17 @@ from ..core.interfaces import IDataService
 
 # Signal definitions as fractions of band width so they scale with any band config.
 # Each entry: (center_frac, sigma_frac, peak_dB)
+# sigma_frac × band_size = sigma in bins; 1 bin = step Hz (default 2500 Hz)
+#   ~1  bin  → CW beacon / unmodulated carrier   (~2.5 kHz)
+#   ~3  bins → NFM voice / narrowband digital    (~7.5 kHz)
+#   ~8  bins → wideband digital / TETRA          (~20 kHz)
+#   ~20 bins → WFM broadcast                     (~50 kHz)
 _STATIC_CARRIERS = [
-    (0.12, 0.0008, 55),   # narrow CW carrier
-    (0.31, 0.003,  48),   # slightly wider carrier (e.g. FM narrowband)
-    (0.58, 0.0006, 60),   # strong narrow carrier
-    (0.79, 0.002,  44),   # medium carrier
+    (0.12, 0.00004, 58),   # CW beacon — ~1 bin wide
+    (0.31, 0.00012, 50),   # NFM voice — ~3 bins wide
+    (0.58, 0.00003, 62),   # strong CW — ~1 bin wide
+    (0.79, 0.00032, 46),   # wideband digital — ~8 bins wide
+    (0.91, 0.00080, 44),   # WFM-like broadcast — ~20 bins wide
 ]
 
 # Frequency-hop channel positions (fractions of band width)
@@ -116,38 +122,34 @@ def _generate(size: int, t: float) -> np.ndarray:
         sigma  = max(1.0, sigma_frac * size)
         frame += _gaussian(size, center, sigma, peak)
 
-    # ── AM-modulated carrier (2nd static position, depth ~±8 dB, rate ~0.8 Hz) ──
+    # ── AM-modulated carrier — NFM-width, amplitude varies ~±8 dB at 0.8 Hz ──
     am_center = int(0.44 * size)
-    am_sigma  = max(1.0, 0.001 * size)
+    am_sigma  = max(1.0, 0.00010 * size)   # ~2.5 bins (NFM)
     am_depth  = 1.0 + 0.35 * np.sin(t * 0.8 * 2 * np.pi)
     frame    += _gaussian(size, am_center, am_sigma, 42.0 * float(am_depth))
 
-    # ── Slowly drifting carrier ────────────────────────────────────────────
-    # Covers 15 %–65 % of the band on a sinusoidal path, period ~20 s
+    # ── Slowly drifting carrier — CW-width, sinusoidal path, period ~20 s ──
     drift_frac   = 0.15 + 0.50 * (np.sin(t * (2 * np.pi / 20.0)) * 0.5 + 0.5)
     drift_center = int(drift_frac * size)
-    drift_sigma  = max(1.0, 0.0007 * size)
+    drift_sigma  = max(1.0, 0.00004 * size)   # ~1 bin (CW)
     frame       += _gaussian(size, drift_center, drift_sigma, 38.0)
 
-    # ── Frequency-hopping signal ───────────────────────────────────────────
+    # ── Frequency-hopping signal — narrowband digital width ────────────────
     hop_cycle     = t % (_HOP_DWELL_S * len(_HOP_CHANNELS))
     hop_slot      = int(hop_cycle / _HOP_DWELL_S)
     hop_phase     = (hop_cycle % _HOP_DWELL_S) / _HOP_DWELL_S
     if hop_phase < _HOP_ON_FRAC:
-        # smooth trapezoidal envelope (10 % rise / fall within the on-period)
         ramp       = min(1.0, hop_phase / 0.10, ((_HOP_ON_FRAC - hop_phase) / 0.10))
         hop_center = int(_HOP_CHANNELS[hop_slot % len(_HOP_CHANNELS)] * size)
-        hop_sigma  = max(1.0, 0.0009 * size)
+        hop_sigma  = max(1.0, 0.00006 * size)   # ~1.5 bins
         frame     += _gaussian(size, hop_center, hop_sigma, 36.0 * ramp)
 
-    # ── Burst signal ───────────────────────────────────────────────────────
-    # On for ~3 s, off for ~5 s (8 s cycle).  Gaussian IF shape, wider than carriers.
+    # ── Burst signal — wideband digital width, 3 s on / 5 s off ──────────
     burst_cycle = t % 8.0
     if burst_cycle < 3.0:
-        # 150 ms rise, 150 ms fall
         ramp        = min(1.0, burst_cycle / 0.15, (3.0 - burst_cycle) / 0.15)
         burst_c     = int(0.66 * size)
-        burst_sigma = max(1.0, 0.004 * size)
+        burst_sigma = max(1.0, 0.00030 * size)   # ~7.5 bins (digital burst)
         frame      += _gaussian(size, burst_c, burst_sigma, 58.0 * ramp)
 
     # ── Intermittent wideband noise source ─────────────────────────────────
