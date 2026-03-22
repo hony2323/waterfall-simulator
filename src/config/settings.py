@@ -27,4 +27,19 @@ class Settings(BaseSettings):
         BandConfig(id="band_0", start=0.0, end=1000.0),
     ]
 
+    # Data source: "generator" uses synthetic data; "microphone" uses live audio
+    data_source: Literal["generator", "microphone"] = "generator"
+
+    # WS send mode: "interval" polls every ws_send_interval_ms; "push" sends immediately on new data
+    ws_mode: Literal["interval", "push"] = "interval"
+
+    # Microphone settings (used when data_source="microphone")
+    mic_sample_rate: int = 44100     # Hz
+    mic_chunk_size: int = 2048       # samples per audio callback
+    mic_fft_size: int = 4096         # FFT window size (power of 2)
+    mic_device: int | str | None = None  # None = system default
+    # dB range mapped to [0, 100]: signals below mic_db_min → 0, at mic_db_max → 100
+    mic_db_min: float = -60.0
+    mic_db_max: float = 0.0
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

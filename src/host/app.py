@@ -1,6 +1,7 @@
 import asyncio
 import json
 import struct
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
@@ -10,7 +11,10 @@ from ..base.metrics import MetricsCollector
 from ..base.models import BandFrame
 from ..base.state import StateManager
 from ..config.settings import Settings
+from ..core.interfaces import IDataService
 from ..services.data_generator import DataGeneratorService
+from ..services.microphone_service import MicrophoneService
+from ..services.realistic_generator import RealisticGeneratorService
 
 
 def _build_binary_message(frames: list[BandFrame], precision: str) -> bytes:
@@ -41,7 +45,7 @@ def _build_binary_message(frames: list[BandFrame], precision: str) -> bytes:
             "band_end": frame.band_end,
             "timestamp": frame.timestamp.isoformat(),
             "sent_at": sent_at_ms,
-            "length": len(frame.data),
+            "length": len(raw),
             "precision": precision,
         })
         data_parts.append(raw)
@@ -54,13 +58,20 @@ def create_app() -> FastAPI:
     settings = Settings()
     state = StateManager(settings)
     metrics = MetricsCollector()
-    generator = DataGeneratorService(state, settings, metrics)
+
+    service: IDataService
+    if settings.data_source == "microphone":
+        service = MicrophoneService(state, settings, metrics)
+    elif settings.data_source == "generator_simple":
+        service = DataGeneratorService(state, settings, metrics)
+    else:
+        service = RealisticGeneratorService(state, settings, metrics)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        await generator.start()
+        await service.start()
         yield
-        await generator.stop()
+        await service.stop()
 
     app = FastAPI(title="Waterfall Backend", lifespan=lifespan)
 
@@ -72,28 +83,41 @@ def create_app() -> FastAPI:
     def get_metrics():
         return metrics.snapshot()
 
+    async def _send_snapshot(websocket: WebSocket) -> None:
+        snapshot = state.latest()
+        frames = [f for f in snapshot.values() if f is not None]
+
+        t_build = time.perf_counter()
+        message = _build_binary_message(frames, settings.precision)
+        build_ms = (time.perf_counter() - t_build) * 1000
+
+        t_send = time.perf_counter()
+        await websocket.send_bytes(message)
+        send_ms = (time.perf_counter() - t_send) * 1000
+
+        now = datetime.now(timezone.utc)
+        frame_age_ms = (
+            max((now - f.timestamp).total_seconds() * 1000 for f in frames)
+            if frames else 0.0
+        )
+        metrics.record_ws_send(len(message), frame_age_ms, build_ms, send_ms)
+
     @app.websocket("/ws")
     async def ws_endpoint(websocket: WebSocket):
         await websocket.accept()
         metrics.record_ws_connected()
-        interval = settings.ws_send_interval_ms / 1000.0
 
         try:
-            while True:
-                snapshot = state.latest()
-                frames = [f for f in snapshot.values() if f is not None]
-
-                message = _build_binary_message(frames, settings.precision)
-                await websocket.send_bytes(message)
-
-                now = datetime.now(timezone.utc)
-                frame_age_ms = (
-                    max((now - f.timestamp).total_seconds() * 1000 for f in frames)
-                    if frames else 0.0
-                )
-                metrics.record_ws_send(len(message), frame_age_ms)
-
-                await asyncio.sleep(interval)
+            if settings.ws_mode == "push":
+                while True:
+                    async with state.data_available:
+                        await state.data_available.wait()
+                    await _send_snapshot(websocket)
+            else:
+                interval = settings.ws_send_interval_ms / 1000.0
+                while True:
+                    await _send_snapshot(websocket)
+                    await asyncio.sleep(interval)
         except WebSocketDisconnect:
             metrics.record_ws_disconnected()
 
